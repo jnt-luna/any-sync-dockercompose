@@ -1,3 +1,9 @@
+# Dokploy: los datos persistentes viven en ../files/ (fuera del directorio del
+# repo, que se borra y se vuelve a clonar en cada despliegue):
+#   ../files/etc      -> configs generadas por any-sync-init (claves, network.yml, client.yml, .aws)
+#   ../files/storage  -> datos de mongo, redis, garage, nodos, networkStore, etc.
+# Lo que viene del repo (./.env, ./docker-generateconfig, ./garage) sigue siendo relativo a ./
+
 x-anysync-daemon: &anysync-daemon
   restart: unless-stopped
   deploy:
@@ -23,7 +29,7 @@ services:
     volumes:
       - ./.env:/code/.env:ro,Z
       - ./docker-generateconfig:/code/docker-generateconfig:ro,Z
-      - "${STORAGE_DIR}:/code/storage:Z"
+      - "../files/storage:/code/storage:Z"
 
   # generate and process any-sync configs
   any-sync-init:
@@ -37,8 +43,8 @@ services:
     volumes:
       - ./.env:/code/.env:ro,Z
       - ./docker-generateconfig:/code/docker-generateconfig:ro,Z
-      - ./etc:/code/etc:Z
-      - "${STORAGE_DIR}:/code/storage:Z"
+      - ../files/etc:/code/etc:Z
+      - "../files/storage:/code/storage:Z"
 
   mongo-1:
     depends_on:
@@ -48,7 +54,7 @@ services:
     restart: unless-stopped
     command: ["--replSet", "${MONGO_REPLICA_SET}", "--port", "${MONGO_1_PORT}"]
     volumes:
-      - "${STORAGE_DIR}/mongo-1:/data/db:Z"
+      - "../files/storage/mongo-1:/data/db:Z"
     healthcheck:
       test: test $$(mongosh --port ${MONGO_1_PORT} --quiet --eval "try {rs.initiate({_id:'${MONGO_REPLICA_SET}',members:[{_id:0,host:\"mongo-1:${MONGO_1_PORT}\"}]})} catch(e) {rs.status().ok}") -eq 1
       interval: 10s
@@ -64,7 +70,7 @@ services:
     restart: unless-stopped
     command: ["redis-server", "--port", "${REDIS_PORT}", "--dir", "/data/", "--appendonly", "yes", "--maxmemory", "${REDIS_MAXMEMORY}", "--maxmemory-policy", "noeviction", "--protected-mode", "no", "--loadmodule", "/opt/redis-stack/lib/redisbloom.so"]
     volumes:
-      - "${STORAGE_DIR}/redis:/data:Z"
+      - "../files/storage/redis:/data:Z"
     healthcheck:
       test: [ "CMD", "redis-cli", "--raw", "-p", "${REDIS_PORT}", "incr", "ping" ]
       interval: 10s
@@ -86,7 +92,7 @@ services:
       GARAGE_DEFAULT_BUCKET: "${S3_BUCKET:?S3_BUCKET is not set - your .env is outdated, see https://github.com/anyproto/any-sync-dockercompose/wiki/Upgrade-Guide}"
     volumes:
       - ./garage/garage.toml:/etc/garage.toml:ro,Z
-      - "${STORAGE_DIR}/garage:/var/lib/garage:Z"
+      - "../files/storage/garage:/var/lib/garage:Z"
     healthcheck:
       test: ["CMD", "/garage", "status"]
       interval: 5s
@@ -108,7 +114,7 @@ services:
       MINIO_ROOT_USER: "${AWS_ACCESS_KEY_ID}"
       MINIO_ROOT_PASSWORD: "${AWS_SECRET_ACCESS_KEY}"
     volumes:
-      - "${STORAGE_DIR}/minio:/data:Z"
+      - "../files/storage/minio:/data:Z"
     healthcheck:
       test: bash -c ':> /dev/tcp/127.0.0.1/9000' || exit 1
       interval: 5s
@@ -133,7 +139,7 @@ services:
     entrypoint: ["/bin/sh", "/code/docker-generateconfig/migrate-s3.sh"]
     volumes:
       - ./docker-generateconfig:/code/docker-generateconfig:ro,Z
-      - "${STORAGE_DIR}:/code/storage:Z"
+      - "../files/storage:/code/storage:Z"
   # ---------------------------------------------------------------------------
 
   any-sync-coordinator_bootstrap:
@@ -144,7 +150,7 @@ services:
       mongo-1:
         condition: service_healthy
     volumes:
-      - ./etc/any-sync-coordinator:/etc/any-sync-coordinator:Z
+      - ../files/etc/any-sync-coordinator:/etc/any-sync-coordinator:Z
     restart: "no"
     command: ["/bin/any-sync-confapply", "-c", "/etc/any-sync-coordinator/config.yml", "-n", "/etc/any-sync-coordinator/network.yml", "-e"]
 
@@ -163,8 +169,8 @@ services:
       - "${ANY_SYNC_COORDINATOR_QUIC_PORT}:${ANY_SYNC_COORDINATOR_QUIC_PORT}/udp"
       - "${ANY_SYNC_COORDINATOR_METRIC_ADDR}:8000"
     volumes:
-      - ./etc/any-sync-coordinator:/etc/any-sync-coordinator:Z
-      - "${STORAGE_DIR}/networkStore/any-sync-coordinator:/networkStore:Z"
+      - ../files/etc/any-sync-coordinator:/etc/any-sync-coordinator:Z
+      - "../files/storage/networkStore/any-sync-coordinator:/networkStore:Z"
 
   any-sync-filenode:
     <<: *anysync-daemon
@@ -181,9 +187,9 @@ services:
       - "${ANY_SYNC_FILENODE_QUIC_PORT}:${ANY_SYNC_FILENODE_QUIC_PORT}/udp"
       - "${ANY_SYNC_FILENODE_METRIC_ADDR}:8000"
     volumes:
-      - ./etc/any-sync-filenode:/etc/any-sync-filenode:Z
-      - ./etc/.aws:/root/.aws:ro
-      - "${STORAGE_DIR}/networkStore/any-sync-filenode:/networkStore:Z"
+      - ../files/etc/any-sync-filenode:/etc/any-sync-filenode:Z
+      - ../files/etc/.aws:/root/.aws:ro
+      - "../files/storage/networkStore/any-sync-filenode:/networkStore:Z"
 
   any-sync-node-1:
     <<: [*anysync-daemon, *anysync-node]
@@ -193,11 +199,11 @@ services:
       - "${ANY_SYNC_NODE_1_API_SERVER_ADDR}:8080"
       - "${ANY_SYNC_NODE_1_METRIC_ADDR}:8000"
     volumes:
-      - ./etc/any-sync-node-1:/etc/any-sync-node:Z
-      - ./etc/.aws:/root/.aws:ro
-      - "${STORAGE_DIR}/any-sync-node-1:/storage:Z"
-      - "${STORAGE_DIR}/anyStorage/any-sync-node-1:/anyStorage:Z"
-      - "${STORAGE_DIR}/networkStore/any-sync-node-1:/networkStore:Z"
+      - ../files/etc/any-sync-node-1:/etc/any-sync-node:Z
+      - ../files/etc/.aws:/root/.aws:ro
+      - "../files/storage/any-sync-node-1:/storage:Z"
+      - "../files/storage/anyStorage/any-sync-node-1:/anyStorage:Z"
+      - "../files/storage/networkStore/any-sync-node-1:/networkStore:Z"
 
   any-sync-node-2:
     <<: [*anysync-daemon, *anysync-node]
@@ -207,11 +213,11 @@ services:
       - "${ANY_SYNC_NODE_2_API_SERVER_ADDR}:8080"
       - "${ANY_SYNC_NODE_2_METRIC_ADDR}:8000"
     volumes:
-      - ./etc/any-sync-node-2:/etc/any-sync-node:Z
-      - ./etc/.aws:/root/.aws:ro
-      - "${STORAGE_DIR}/any-sync-node-2:/storage:Z"
-      - "${STORAGE_DIR}/anyStorage/any-sync-node-2:/anyStorage:Z"
-      - "${STORAGE_DIR}/networkStore/any-sync-node-2:/networkStore:Z"
+      - ../files/etc/any-sync-node-2:/etc/any-sync-node:Z
+      - ../files/etc/.aws:/root/.aws:ro
+      - "../files/storage/any-sync-node-2:/storage:Z"
+      - "../files/storage/anyStorage/any-sync-node-2:/anyStorage:Z"
+      - "../files/storage/networkStore/any-sync-node-2:/networkStore:Z"
 
   any-sync-node-3:
     <<: [*anysync-daemon, *anysync-node]
@@ -221,11 +227,11 @@ services:
       - "${ANY_SYNC_NODE_3_API_SERVER_ADDR}:8080"
       - "${ANY_SYNC_NODE_3_METRIC_ADDR}:8000"
     volumes:
-      - ./etc/any-sync-node-3:/etc/any-sync-node:Z
-      - ./etc/.aws:/root/.aws:ro
-      - "${STORAGE_DIR}/any-sync-node-3:/storage:Z"
-      - "${STORAGE_DIR}/anyStorage/any-sync-node-3:/anyStorage:Z"
-      - "${STORAGE_DIR}/networkStore/any-sync-node-3:/networkStore:Z"
+      - ../files/etc/any-sync-node-3:/etc/any-sync-node:Z
+      - ../files/etc/.aws:/root/.aws:ro
+      - "../files/storage/any-sync-node-3:/storage:Z"
+      - "../files/storage/anyStorage/any-sync-node-3:/anyStorage:Z"
+      - "../files/storage/networkStore/any-sync-node-3:/networkStore:Z"
 
   any-sync-consensusnode:
     <<: *anysync-daemon
@@ -238,8 +244,8 @@ services:
       - "${ANY_SYNC_CONSENSUSNODE_QUIC_PORT}:${ANY_SYNC_CONSENSUSNODE_QUIC_PORT}/udp"
       - "${ANY_SYNC_CONSENSUSNODE_METRIC_ADDR}:8000"
     volumes:
-      - ./etc/any-sync-consensusnode:/etc/any-sync-consensusnode:Z
-      - "${STORAGE_DIR}/networkStore/any-sync-consensusnode:/networkStore:Z"
+      - ../files/etc/any-sync-consensusnode:/etc/any-sync-consensusnode:Z
+      - "../files/storage/networkStore/any-sync-consensusnode:/networkStore:Z"
 
   # any-sync-netcheck
   netcheck:
@@ -254,7 +260,7 @@ services:
       - any-sync-node-2
       - any-sync-node-3
     volumes:
-      - "${STORAGE_DIR}/docker-generateconfig:/conf:Z"
+      - "../files/storage/docker-generateconfig:/conf:Z"
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -281,8 +287,8 @@ services:
   #     netcheck:
   #       condition: service_healthy
   #   volumes:
-  #     - ./etc/client.yml:/etc/anytype/network.yml:ro
-  #     - "${STORAGE_DIR}/anytype-cli:/root/.anytype:Z"
+  #     - ../files/etc/client.yml:/etc/anytype/network.yml:ro
+  #     - "../files/storage/anytype-cli:/root/.anytype:Z"
   #   environment:
   #     - ANYTYPE_CLI_ACCOUNT_NAME=${ANYTYPE_CLI_ACCOUNT_NAME:-anytype-bot}
   #   entrypoint: >
@@ -315,8 +321,8 @@ services:
   #     - "${ANYTYPE_CLI_GRPC_WEB_PORT}:31011"
   #     - "${ANYTYPE_CLI_API_PORT}:31012"
   #   volumes:
-  #     - ./etc/client.yml:/etc/anytype/network.yml:ro
-  #     - "${STORAGE_DIR}/anytype-cli:/root/.anytype:Z"
+  #     - ../files/etc/client.yml:/etc/anytype/network.yml:ro
+  #     - "../files/storage/anytype-cli:/root/.anytype:Z"
   #   healthcheck:
   #     test: nc -z 127.0.0.1 31010 || exit 1
   #     interval: 30s
